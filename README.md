@@ -1,83 +1,58 @@
 # CircuitCheck
 
-Researchers who study how language models work often make claims like "these 50
-internal features are the circuit the model uses to answer this question." The usual
-evidence is a picture called an attribution graph, built from a single prompt. The
-problem is that a graph built from one prompt says little about whether the same
-circuit does the work on other prompts. In practice the explanation is often checked
-on the same prompt it was found on, which is a bit like grading a student on the exact
-questions they studied.
+## Problem
 
-CircuitCheck is a tool I'm building to test those claims more fairly. You give it a
-circuit and a family of similar prompts, and it measures how much of the model's
-behaviour the circuit can reproduce on prompts it has never seen.
+Interpretability work often claims that a small set of features (a "circuit")
+explains how a model produces some output. That claim is typically checked on
+the same prompt the circuit was found on--evidence that it fits the prompt,
+not that it generalizes. CircuitCheck scores a circuit on prompts it has never
+seen, so a reported result reflects generalization rather than curve-fitting.
 
-## How it works
+## Method
 
-Take the prompt "Fact: the capital of France is". The model should prefer " Paris"
-over a wrong answer like " London", and the gap between those two scores is the
-thing we measure. CircuitCheck runs the model three ways on a new prompt, such as the
-same sentence about Germany:
+For a prompt family (e.g. "the capital of France is" / "... Germany is" / ...),
+the model is run three ways on each held-out prompt:
 
-1. Untouched, to get the model's normal answer.
-2. With everything except the claimed circuit switched off.
-3. With everything switched off.
+1. Unmodified.
+2. With everything except the circuit ablated.
+3. With everything ablated.
 
-If running only the circuit gets you back to the normal answer, the circuit scores
-1. If it does no better than having nothing at all, it scores 0. The score is
-`F = (circuit - nothing) / (normal - nothing)`.
+Faithfulness is `F = (circuit - nothing) / (normal - nothing)`: 1 means the
+circuit alone reproduces the full behavior, 0 means it does no better than
+nothing.
 
-Most of the work went into making sure that number can be trusted:
+Guarantees:
 
-- **No testing on the training prompt.** The tool refuses to score a circuit on any
-  prompt it was discovered on. That includes copies that differ only in spacing or
-  capitalization, and prompts that are almost identical. You can override this, but
-  the override is written into the results permanently.
-- **Interventions are checked against the real model.** I read the source of the
-  library that does the "switching off" and wrote tests for what it actually does.
-  For example, intervening at word 4 must not change anything the model computed for
-  words 1 to 3. One finding was that the library's documentation overstates what
-  one of its options freezes, so I corrected my own design document to match.
-- **No fake precision.** The model computes in a low-precision number format, so
-  every score comes with an error bar. If the bottom of the fraction is too close to
-  zero to measure, the tool reports "undefined" instead of a number. Strange scores
-  (below 0 or above 1) are kept and flagged, never quietly trimmed into range,
-  because they usually point to a real problem.
-- **Every result is reproducible.** Each report records the model version, the
-  library versions, the precision settings and the random seed. Running it twice
-  gives identical numbers.
+- Scoring on the discovery prompt (or near-duplicates) is refused unless
+  explicitly overridden; overrides are recorded in the output.
+- Ablation behavior is verified against the underlying library's actual
+  implementation, not just its documentation.
+- Scores include error bars from the model's low-precision arithmetic.
+  Undefined scores (near-zero denominator) are reported as such rather than
+  as a number. Out-of-range scores are kept and flagged, not clipped.
+- Reports pin model/library versions, precision settings, and seed.
 
-## What I've found so far
+## Status
 
-This is an early version. It scores one circuit, from Google's Gemma-2-2b model, on
-eight countries it wasn't discovered on. The circuit was found on the France prompt.
-On the new countries it scored 0.50 on average, but the individual scores ranged from
-0.03 (Germany) to 1.83 (Greece). Greece's baseline was so small that its error bar is
-nearly as large as the score, and the tool says so.
+Early--one circuit (Gemma-2-2b, found on the France prompt) scored on eight
+held-out country prompts: mean F = 0.50, range 0.03–1.83. The high-end score
+carries a wide error bar from a small denominator.
 
-Building the tool also turned up some problems with the experiment itself, which I
-think are the most interesting part so far:
+Open questions surfaced so far:
 
-- Whether "switch off everything outside the circuit" includes features that only
-  turn on *because* of the switching-off changes the answer dramatically. One
-  measurement dropped from 7.7 to 0.9.
-- One common way of switching features off ("replace with the average") does almost
-  nothing on prompts that share most of their words. That leaves the measurement
-  with very little signal.
+- Whether features that activate only as a side effect of ablation should
+  count as "outside the circuit" — this choice swung one score from 7.7 to 0.9.
+- Mean-ablation is a weak baseline on prompts that share most of their tokens.
 
-These are design decisions I still need to settle before the numbers mean much.
+## Next
 
-## What's next
+Score circuits against size-matched random baselines so a result is judged
+against chance, not read in isolation. Then expand prompt families beyond
+single-token substitution.
 
-The planned comparison is the real test. Each circuit will be scored against
-random circuits of the same size drawn from the same model, so a circuit only
-"passes" if it does clearly better than chance. After that I'll add more prompt
-variations, such as rephrased sentences.
+## Quickstart
 
-## Running it
-
-It needs an NVIDIA GPU with about 22 GB of memory and access to Gemma-2-2b on
-Hugging Face.
+Requires an NVIDIA GPU (~22GB) and access to Gemma-2-2b on Hugging Face.
 
 ```
 # build an attribution graph for the discovery prompt
@@ -89,7 +64,30 @@ CUBLAS_WORKSPACE_CONFIG=:4096:8 python -m circuitcheck.cli validate \
     --circuit france.pt --family fixtures/country_capital.yaml --out report.json
 ```
 
-Tests: `pytest` runs the quick checks, and `pytest -m gpu` runs the ones that load
-the real model.
+`pytest` runs unit tests; `pytest -m gpu` runs the model-dependent ones.
+
+## Example output
+
+`report.json`, trimmed to the headline and one held-out prompt:
+
+```json
+{
+  "headline": { "f_mean": 0.50, "regime": "frozen", "n_valid": 8, "n_prompts": 8 },
+  "per_prompt": [
+    {
+      "instance_id": "germany",
+      "correct": { "token": " Berlin" },
+      "foil": { "token": " London" },
+      "regimes": {
+        "frozen": { "f": 0.03, "valid": true, "warnings": [] }
+      }
+    }
+  ]
+}
+```
+
+`f` is the per-prompt score; `headline.f_mean` averages it over all valid,
+held-out prompts. A prompt scores `valid: false` with no `f` when its
+denominator is too small to trust.
 
 Built on [circuit-tracer](https://github.com/safety-research/circuit-tracer).
