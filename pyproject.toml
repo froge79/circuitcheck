@@ -1,0 +1,25 @@
+[project]
+name = "circuitcheck"
+version = "0.0.1"
+description = "Validate attribution-graph circuits on held-out prompts against a matched null."
+requires-python = ">=3.12"
+dependencies = ["circuit-tracer==0.5.0", "torch", "pyyaml"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+circuitcheck = "circuitcheck.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["circuitcheck*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-m 'not gpu'"
+markers = ["gpu: runs the real Gemma-2-2b model and interventions (needs CUDA and HF weights)"]

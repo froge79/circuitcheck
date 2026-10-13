@@ -1,0 +1,15 @@
+name: country_capital
+template: "Fact: the capital of {country} is"
+# Every country and capital is a single Gemma-2 token (checked), so all prompts share one
+# span layout and anchor-aligned mean-ablation is well defined. France is the discovery
+# instance; validate() excludes it from the held-out draw and reports the exclusion.
+instances:
+  - {id: france,   country: France,   correct: " Paris",  foil: " London"}
+  - {id: germany,  country: Germany,  correct: " Berlin", foil: " London"}
+  - {id: italy,    country: Italy,    correct: " Rome",   foil: " London"}
+  - {id: spain,    country: Spain,    correct: " Madrid", foil: " London"}
+  - {id: japan,    country: Japan,    correct: " Tokyo",  foil: " London"}
+  - {id: russia,   country: Russia,   correct: " Moscow", foil: " London"}
+  - {id: egypt,    country: Egypt,    correct: " Cairo",  foil: " London"}
+  - {id: greece,   country: Greece,   correct: " Athens", foil: " London"}
+  - {id: poland,   country: Poland,   correct: " Warsaw", foil: " London"}
